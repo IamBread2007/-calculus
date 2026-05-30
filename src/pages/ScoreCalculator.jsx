@@ -76,6 +76,75 @@ export default function ScoreCalculator() {
   const [showResult, setShowResult] = useState(false);
   const { isDark, toggleTheme } = useTheme();
 
+  // International English Certificate State
+  const [useIntlEnglish, setUseIntlEnglish] = useState(false);
+  const [certType, setCertType] = useState('ielts');
+  const [certScore, setCertScore] = useState('');
+  const [certScoreToeicSW, setCertScoreToeicSW] = useState('');
+
+  // Conversion table lookup
+  const certConversionResult = useMemo(() => {
+    if (!useIntlEnglish) return { converted: null, status: 'disabled' };
+    
+    const val = parseFloat(certScore);
+    if (isNaN(val)) return { converted: null, status: 'empty' };
+
+    if (certType === 'ielts') {
+      if (val < 6.0) return { converted: null, status: 'invalid', message: 'Điểm IELTS chưa đủ điều kiện quy đổi (yêu cầu ≥ 6.0)' };
+      if (val >= 8.0) return { converted: 10.0, status: 'success' };
+      if (val >= 7.5) return { converted: 9.5, status: 'success' };
+      if (val >= 7.0) return { converted: 9.0, status: 'success' };
+      if (val >= 6.5) return { converted: 8.5, status: 'success' };
+      if (val >= 6.0) return { converted: 8.0, status: 'success' };
+    } else if (certType === 'pte') {
+      if (val < 47) return { converted: null, status: 'invalid', message: 'Điểm PTE chưa đủ điều kiện quy đổi (yêu cầu ≥ 47)' };
+      if (val >= 79) return { converted: 10.0, status: 'success' };
+      if (val >= 71) return { converted: 9.5, status: 'success' };
+      if (val >= 63) return { converted: 9.0, status: 'success' };
+      if (val >= 55) return { converted: 8.5, status: 'success' };
+      if (val >= 47) return { converted: 8.0, status: 'success' };
+    } else if (certType === 'toefl') {
+      if (val < 60) return { converted: null, status: 'invalid', message: 'Điểm TOEFL iBT chưa đủ điều kiện quy đổi (yêu cầu ≥ 60)' };
+      if (val >= 110) return { converted: 10.0, status: 'success' };
+      if (val >= 102) return { converted: 9.5, status: 'success' };
+      if (val >= 94) return { converted: 9.0, status: 'success' };
+      if (val >= 79) return { converted: 8.5, status: 'success' };
+      if (val >= 60) return { converted: 8.0, status: 'success' };
+    } else if (certType === 'toeic') {
+      const swVal = parseFloat(certScoreToeicSW);
+      if (isNaN(swVal)) return { converted: null, status: 'incomplete', message: 'Vui lòng nhập đầy đủ cả điểm Nghe & Đọc và Nói & Viết' };
+
+      if (val < 570 || swVal < 310) {
+        let msg = '';
+        if (val < 570 && swVal < 310) {
+          msg = 'Điểm TOEIC Nghe & Đọc (yêu cầu ≥ 570) và Nói & Viết (yêu cầu ≥ 310) chưa đủ điều kiện quy đổi';
+        } else if (val < 570) {
+          msg = 'Điểm TOEIC Nghe & Đọc chưa đủ điều kiện quy đổi (yêu cầu ≥ 570)';
+        } else {
+          msg = 'Điểm TOEIC Nói & Viết chưa đủ điều kiện quy đổi (yêu cầu ≥ 310)';
+        }
+        return { converted: null, status: 'invalid', message: msg };
+      }
+
+      let lrConverted = 8.0;
+      if (val >= 905) lrConverted = 10.0;
+      else if (val >= 835) lrConverted = 9.5;
+      else if (val >= 785) lrConverted = 9.0;
+      else if (val >= 685) lrConverted = 8.5;
+      else if (val >= 570) lrConverted = 8.0;
+
+      let swConverted = 8.0;
+      if (swVal >= 390) swConverted = 10.0;
+      else if (swVal >= 380) swConverted = 9.5;
+      else if (swVal >= 360) swConverted = 9.0;
+      else if (swVal >= 330) swConverted = 8.5;
+      else if (swVal >= 310) swConverted = 8.0;
+
+      return { converted: Math.min(lrConverted, swConverted), status: 'success' };
+    }
+    return { converted: null, status: 'empty' };
+  }, [useIntlEnglish, certType, certScore, certScoreToeicSW]);
+
   // Handle score input
   const handleScoreChange = (key, value) => {
     setScores(prev => ({ ...prev, [key]: value }));
@@ -100,6 +169,10 @@ export default function ScoreCalculator() {
       khuVuc: '0',
       doiTuong: '0',
     });
+    setUseIntlEnglish(false);
+    setCertType('ielts');
+    setCertScore('');
+    setCertScoreToeicSW('');
     setShowResult(false);
   };
 
@@ -109,7 +182,12 @@ export default function ScoreCalculator() {
     const dgnlToan = parseFloat(scores.dgnlToan) || 0;        // Điểm Toán ĐGNL
     const tnthptToan = parseFloat(scores.tnthptToan) || 0;
     const tnthptMon2 = parseFloat(scores.tnthptMon2) || 0;
-    const tnthptMon3 = parseFloat(scores.tnthptMon3) || 0;
+    
+    let tnthptMon3 = parseFloat(scores.tnthptMon3) || 0;
+    if (useIntlEnglish && certConversionResult.converted !== null) {
+      tnthptMon3 = certConversionResult.converted;
+    }
+    
     // Điểm TNTHPT quy đổi = [Tổng điểm 3 môn, TOÁN x 2] / 4 x 10
     const tongTNTHPT = tnthptToan * 2 + tnthptMon2 + tnthptMon3;
     const diemTNTHPTQuyDoi = (tongTNTHPT / 4) * 10;
@@ -208,7 +286,7 @@ export default function ScoreCalculator() {
       hocBaDisplay,
       hocBaFormulaText
     };
-  }, [scores, hasDGNL]);
+  }, [scores, hasDGNL, useIntlEnglish, certConversionResult]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:from-dark-bg dark:via-dark-bg dark:to-dark-bg transition-colors duration-300">
@@ -388,28 +466,161 @@ export default function ScoreCalculator() {
                 </span>
               </div>
 
-              <label className="block text-sm font-medium text-neutral-700 dark:text-dark-text-sec mb-2">
-                Điểm 3 môn thi TNTHPT trong tổ hợp
-              </label>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                <label className="block text-sm font-semibold text-neutral-700 dark:text-dark-text-sec">
+                  Điểm 3 môn thi TNTHPT trong tổ hợp
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-semibold text-neutral-600 dark:text-dark-text-sec bg-slate-100 dark:bg-dark-hover px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-dark-border hover:bg-slate-200 dark:hover:bg-dark-border/80 transition-colors shadow-sm">
+                  <input
+                    type="checkbox"
+                    checked={useIntlEnglish}
+                    onChange={(e) => {
+                      setUseIntlEnglish(e.target.checked);
+                      setShowResult(false);
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="relative w-7 h-4 bg-slate-300 dark:bg-neutral-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#1a2d6d]"></div>
+                  <span>Dùng chứng chỉ tiếng Anh quốc tế</span>
+                </label>
+              </div>
+
+              {/* International English Certificate Section */}
+              {useIntlEnglish && (
+                <div className="mb-4 p-4 bg-slate-50 dark:bg-dark-bg border border-neutral-200 dark:border-dark-border rounded-xl space-y-4 shadow-inner">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-500 dark:text-dark-text-sec mb-1.5">
+                        Loại chứng chỉ tiếng Anh
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={certType}
+                          onChange={(e) => {
+                            setCertType(e.target.value);
+                            setCertScore('');
+                            setCertScoreToeicSW('');
+                            setShowResult(false);
+                          }}
+                          className="w-full px-3 py-2.5 text-sm bg-white dark:bg-dark-hover border border-neutral-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-[#1a2d6d] focus:border-transparent outline-none text-neutral-900 dark:text-dark-text-main appearance-none cursor-pointer"
+                        >
+                          <option value="ielts">IELTS (Academic)</option>
+                          <option value="pte">PTE (Academic)</option>
+                          <option value="toefl">TOEFL iBT</option>
+                          <option value="toeic">TOEIC (LR + SW)</option>
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-neutral-400">
+                          <ChevronDown className="w-4 h-4" />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-500 dark:text-dark-text-sec mb-1.5">
+                        {certType === 'toeic' ? 'Điểm Nghe & Đọc (570 - 990)' : `Điểm số (${certType === 'ielts' ? 'VD: 6.5, 7.0...' : certType === 'pte' ? '47 - 90' : '60 - 120'})`}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step={certType === 'ielts' ? '0.5' : '1'}
+                        value={certScore}
+                        onChange={(e) => {
+                          setCertScore(e.target.value);
+                          setShowResult(false);
+                        }}
+                        placeholder={certType === 'ielts' ? 'Nhập điểm IELTS...' : certType === 'toeic' ? 'Nhập điểm Nghe & Đọc...' : certType === 'pte' ? 'Nhập điểm PTE...' : 'Nhập điểm TOEFL iBT...'}
+                        className="w-full px-3 py-2.5 text-sm bg-white dark:bg-dark-hover border border-neutral-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-[#1a2d6d] focus:border-transparent outline-none text-neutral-900 dark:text-dark-text-main placeholder:text-neutral-400 dark:placeholder:text-dark-text-sec"
+                      />
+                    </div>
+                  </div>
+                  
+                  {certType === 'toeic' && (
+                    <div className="grid grid-cols-1 gap-1">
+                      <label className="block text-xs font-semibold text-neutral-500 dark:text-dark-text-sec mb-1.5">
+                        Điểm Nói & Viết (310 - 400)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={certScoreToeicSW}
+                        onChange={(e) => {
+                          setCertScoreToeicSW(e.target.value);
+                          setShowResult(false);
+                        }}
+                        placeholder="Nhập điểm Nói & Viết..."
+                        className="w-full px-3 py-2.5 text-sm bg-white dark:bg-dark-hover border border-neutral-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-[#1a2d6d] focus:border-transparent outline-none text-neutral-900 dark:text-dark-text-main placeholder:text-neutral-400 dark:placeholder:text-dark-text-sec"
+                      />
+                    </div>
+                  )}
+                  
+                  {certType === 'toeic' && (
+                    <div className="flex items-start gap-2 text-xs text-neutral-600 dark:text-dark-text-sec bg-neutral-100/60 dark:bg-neutral-800/30 p-3 rounded-xl border border-neutral-200 dark:border-neutral-700/50">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-[#1a2d6d] dark:text-blue-400" />
+                      <p className="leading-relaxed">
+                        <strong className="text-neutral-800 dark:text-dark-text-main">Lưu ý:</strong> Để quy đổi tương đương, cả 02 cặp điểm thành phần <strong>Nghe – Đọc</strong> và <strong>Nói – Viết</strong> phải đồng thời đạt điểm CCTA theo quy định. Trường hợp chỉ một trong hai cặp đạt yêu cầu, điểm quy đổi môn Tiếng Anh sẽ được xác định theo cặp điểm thành phần có mức <strong>thấp hơn</strong>.
+                      </p>
+                    </div>
+                  )}
+                  {/* Status Banner */}
+                  {certConversionResult.status === 'success' && (
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100/60 dark:bg-emerald-950/20 p-3 rounded-xl border border-emerald-200 dark:border-emerald-900/30">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <span>Quy đổi thành công: {certConversionResult.converted.toFixed(1)} điểm môn tiếng Anh THPT.</span>
+                    </div>
+                  )}
+                  {certConversionResult.status === 'invalid' && (
+                    <div className="flex items-start gap-2.5 text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-200 dark:border-amber-900/30">
+                      <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                      <span>{certConversionResult.message}</span>
+                    </div>
+                  )}
+                  {certConversionResult.status === 'incomplete' && (
+                    <div className="flex items-start gap-2.5 text-xs font-bold text-blue-700 dark:text-blue-400 bg-blue-100/60 dark:bg-blue-950/20 p-3 rounded-xl border border-blue-200 dark:border-blue-900/30">
+                      <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                      <span>{certConversionResult.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-3 gap-4">
                 {[
                   { key: 'tnthptToan', placeholder: 'Môn Toán' },
                   { key: 'tnthptMon2', placeholder: 'Môn 2' },
                   { key: 'tnthptMon3', placeholder: 'Môn 3' }
-                ].map((field) => (
-                  <div key={field.key}>
-                    <input
-                      type="number"
-                      min="0"
-                      max="10"
-                      step="0.01"
-                      value={scores[field.key]}
-                      onChange={(e) => handleScoreChange(field.key, e.target.value)}
-                      placeholder={field.placeholder}
-                      className="w-full px-4 py-3 bg-white dark:bg-dark-hover border border-neutral-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all text-neutral-900 dark:text-dark-text-main placeholder:text-neutral-400 dark:placeholder:text-dark-text-sec"
-                    />
-                  </div>
-                ))}
+                ].map((field) => {
+                  const isMon3 = field.key === 'tnthptMon3';
+                  const isDisabled = isMon3 && useIntlEnglish;
+                  const displayValue = (isMon3 && useIntlEnglish) 
+                    ? (certConversionResult.converted !== null ? certConversionResult.converted.toFixed(1) : '') 
+                    : scores[field.key];
+                  
+                  return (
+                    <div key={field.key} className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="10"
+                        step="0.01"
+                        disabled={isDisabled}
+                        value={displayValue}
+                        onChange={(e) => handleScoreChange(field.key, e.target.value)}
+                        placeholder={isDisabled ? 'Quy đổi...' : field.placeholder}
+                        className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:border-transparent outline-none transition-all placeholder:text-neutral-400 dark:placeholder:text-dark-text-sec text-center ${
+                          isDisabled 
+                            ? 'bg-emerald-50/50 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-900/30 text-emerald-600 dark:text-emerald-400 font-bold focus:ring-emerald-500' 
+                            : 'bg-white dark:bg-dark-hover border-neutral-300 dark:border-dark-border text-neutral-900 dark:text-dark-text-main focus:ring-emerald-500'
+                        }`}
+                      />
+                      {isDisabled && certConversionResult.converted !== null && (
+                        <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-[9px] font-extrabold text-white bg-emerald-500 rounded-md tracking-wider uppercase shadow-sm">
+                          Quy đổi
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
