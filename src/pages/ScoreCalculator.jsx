@@ -21,11 +21,17 @@ import { insforge } from '../lib/insforge';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function ScoreCalculator() {
-  const [hasDGNL, setHasDGNL] = useState(true); // Có thi ĐGNL hay không
+  const [admissionMethod, setAdmissionMethod] = useState('dgnl'); // 'dgnl' | 'thpt' | 'sat'
+  const hasDGNL = admissionMethod === 'dgnl';
 
   // Admission Scores State
   const [admissionScores, setAdmissionScores] = useState({ daiTra: [], oisp: [] });
   const [loadingScores, setLoadingScores] = useState(true);
+
+  // SAT Conversions State
+  const [satConversions, setSatConversions] = useState([]);
+  const [satScore, setSatScore] = useState('');
+  const [showSatModal, setShowSatModal] = useState(false);
   
   // Collapsible UI state
   const [expandedMain, setExpandedMain] = useState({ qual: true, unqual: false });
@@ -34,7 +40,7 @@ export default function ScoreCalculator() {
     unqualDaiTra: true, unqualOISP: true 
   });
 
-  // Fetch admission scores on mount
+  // Fetch admission scores and SAT conversions on mount
   useEffect(() => {
     async function fetchScores() {
       try {
@@ -55,7 +61,23 @@ export default function ScoreCalculator() {
         setLoadingScores(false);
       }
     }
+
+    async function fetchSatConversions() {
+      try {
+        const { data, error } = await insforge.database
+          .from('sat_conversion_2025')
+          .select('*')
+          .order('sat_score', { ascending: false });
+        if (data) {
+          setSatConversions(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch SAT conversions:", err);
+      }
+    }
+
     fetchScores();
+    fetchSatConversions();
   }, []);
   const [scores, setScores] = useState({
     dgnlScore: '',        // Điểm ĐGNL đã trừ Toán (0-900)
@@ -173,8 +195,56 @@ export default function ScoreCalculator() {
     setCertType('ielts');
     setCertScore('');
     setCertScoreToeicSW('');
+    setSatScore('');
+    setAdmissionMethod('dgnl');
+    setShowSatModal(false);
     setShowResult(false);
   };
+
+  // Calculate SAT converted score using linear interpolation
+  const satConversionResult = useMemo(() => {
+    if (admissionMethod !== 'sat') return { converted: null, status: 'disabled' };
+    const val = parseInt(satScore, 10);
+    if (isNaN(val) || !satScore) return { converted: null, status: 'empty' };
+
+    if (val < 1200) {
+      return { converted: null, status: 'invalid', message: 'Điểm SAT chưa đủ điều kiện quy đổi (yêu cầu ≥ 1200)' };
+    }
+    if (val > 1600) {
+      return { converted: null, status: 'invalid', message: 'Điểm SAT không hợp lệ (tối đa 1600)' };
+    }
+
+    // If we have database records, search them
+    if (satConversions.length > 0) {
+      const exactMatch = satConversions.find(item => item.sat_score === val);
+      if (exactMatch) {
+        return { converted: parseFloat(exactMatch.converted_score), status: 'success' };
+      }
+
+      for (let i = 0; i < satConversions.length - 1; i++) {
+        const upper = satConversions[i];
+        const lower = satConversions[i + 1];
+        if (upper.sat_score > val && lower.sat_score < val) {
+          const x1 = lower.sat_score;
+          const x2 = upper.sat_score;
+          const y1 = parseFloat(lower.converted_score);
+          const y2 = parseFloat(upper.converted_score);
+          
+          const converted = y1 + ((val - x1) / (x2 - x1)) * (y2 - y1);
+          return { converted: parseFloat(converted.toFixed(2)), status: 'success' };
+        }
+      }
+    }
+
+    // Fallback formula matching the table exactly
+    if (val >= 1300) {
+      const converted = 70 + (val - 1300) / 10;
+      return { converted: parseFloat(converted.toFixed(2)), status: 'success' };
+    } else {
+      const converted = 65 + (val - 1200) / 20;
+      return { converted: parseFloat(converted.toFixed(2)), status: 'success' };
+    }
+  }, [admissionMethod, satScore, satConversions]);
 
   // Calculate scores
   const result = useMemo(() => {
@@ -229,13 +299,11 @@ export default function ScoreCalculator() {
 
     let diemNangLuc;
 
-    if (hasDGNL) {
-      // Với thí sinh CÓ thi ĐGNL:
-      // Điểm năng lực = [Điểm ĐGNL đã trừ Toán + Điểm Toán × 2] / 15
+    if (admissionMethod === 'dgnl') {
       diemNangLuc = (dgnlScore + (dgnlToan * 2)) / 15;
+    } else if (admissionMethod === 'sat') {
+      diemNangLuc = satConversionResult.converted || 0;
     } else {
-      // Với thí sinh KHÔNG thi ĐGNL:
-      // Điểm năng lực = Điểm TNTHPT quy đổi x 0.75
       diemNangLuc = diemTNTHPTQuyDoi * 0.75;
     }
 
@@ -286,7 +354,7 @@ export default function ScoreCalculator() {
       hocBaDisplay,
       hocBaFormulaText
     };
-  }, [scores, hasDGNL, useIntlEnglish, certConversionResult]);
+  }, [scores, admissionMethod, useIntlEnglish, certConversionResult, satConversionResult]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:from-dark-bg dark:via-dark-bg dark:to-dark-bg transition-colors duration-300">
@@ -361,18 +429,18 @@ export default function ScoreCalculator() {
           </div>
         </section>
 
-        {/* Toggle DGNL */}
+        {/* Toggle Admission Method */}
         <section className="mb-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 bg-white dark:bg-dark-surface rounded-xl border border-neutral-200 dark:border-dark-border shadow-sm transition-colors duration-300">
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-4 p-4 bg-white dark:bg-dark-surface rounded-xl border border-neutral-200 dark:border-dark-border shadow-sm transition-colors duration-300">
             <div className="flex items-center gap-2">
               <HelpCircle className="w-5 h-5 text-neutral-400 dark:text-dark-text-sec" />
-              <span className="font-medium text-neutral-700 dark:text-dark-text-main">Bạn có tham gia kỳ thi ĐGNL không?</span>
+              <span className="font-medium text-neutral-700 dark:text-dark-text-main">Chọn hình thức tính Điểm Năng Lực:</span>
             </div>
-            <div className="flex gap-2 ml-auto w-full sm:w-auto">
+            <div className="flex flex-wrap gap-2 md:ml-auto w-full md:w-auto">
               <button
-                onClick={() => { setHasDGNL(true); setShowResult(false); }}
-                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg font-medium transition-all ${
-                  hasDGNL 
+                onClick={() => { setAdmissionMethod('dgnl'); setShowResult(false); }}
+                className={`flex-1 md:flex-none px-4 py-2 rounded-lg font-medium transition-all text-sm ${
+                  admissionMethod === 'dgnl' 
                     ? 'bg-[#1a2d6d] text-white shadow-md' 
                     : 'bg-neutral-100 dark:bg-dark-hover text-neutral-600 dark:text-dark-text-sec hover:bg-neutral-200 dark:hover:bg-dark-border'
                 }`}
@@ -380,14 +448,24 @@ export default function ScoreCalculator() {
                 Có thi ĐGNL
               </button>
               <button
-                onClick={() => { setHasDGNL(false); setShowResult(false); }}
-                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg font-medium transition-all ${
-                  !hasDGNL 
+                onClick={() => { setAdmissionMethod('thpt'); setShowResult(false); }}
+                className={`flex-1 md:flex-none px-4 py-2 rounded-lg font-medium transition-all text-sm ${
+                  admissionMethod === 'thpt' 
                     ? 'bg-[#1a2d6d] text-white shadow-md' 
                     : 'bg-neutral-100 dark:bg-dark-hover text-neutral-600 dark:text-dark-text-sec hover:bg-neutral-200 dark:hover:bg-dark-border'
                 }`}
               >
                 Không thi ĐGNL
+              </button>
+              <button
+                onClick={() => { setAdmissionMethod('sat'); setShowResult(false); }}
+                className={`flex-1 md:flex-none px-4 py-2 rounded-lg font-medium transition-all text-sm ${
+                  admissionMethod === 'sat' 
+                    ? 'bg-[#1a2d6d] text-white shadow-md' 
+                    : 'bg-neutral-100 dark:bg-dark-hover text-neutral-600 dark:text-dark-text-sec hover:bg-neutral-200 dark:hover:bg-dark-border'
+                }`}
+              >
+                Quy đổi SAT
               </button>
             </div>
           </div>
@@ -407,9 +485,9 @@ export default function ScoreCalculator() {
           </div>
 
           <div className="space-y-6">
-            {/* ĐGNL Scores - Only show if hasDGNL */}
+            {/* ĐGNL Scores - Only show if method is dgnl */}
             <AnimatePresence>
-              {hasDGNL && (
+              {admissionMethod === 'dgnl' && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
@@ -453,6 +531,70 @@ export default function ScoreCalculator() {
                       />
                     </div>
                   </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* SAT Score Input - Only show if method is sat */}
+            <AnimatePresence>
+              {admissionMethod === 'sat' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="space-y-4"
+                >
+                  <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-sm text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-900/30">
+                    <div className="flex items-center gap-2">
+                      <Info className="w-4 h-4 flex-shrink-0" />
+                      <span>
+                        <strong>Điểm năng lực</strong> = Điểm quy đổi từ chứng chỉ quốc tế SAT (thang 100)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowSatModal(true)}
+                      className="text-xs font-semibold text-[#1a2d6d] dark:text-blue-400 hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                    >
+                      <Trophy className="w-3.5 h-3.5" />
+                      Xem bảng quy đổi SAT
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-neutral-700 dark:text-dark-text-sec mb-2">
+                        Điểm chứng chỉ SAT (1200 - 1600)
+                      </label>
+                      <input
+                        type="number"
+                        min="1200"
+                        max="1600"
+                        step="10"
+                        value={satScore}
+                        onChange={(e) => {
+                          setSatScore(e.target.value);
+                          setShowResult(false);
+                        }}
+                        placeholder="VD: 1450"
+                        className="w-full px-4 py-3 bg-white dark:bg-dark-hover border border-neutral-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-[#1a2d6d] dark:focus:ring-blue-500 focus:border-transparent outline-none transition-all text-neutral-900 dark:text-dark-text-main placeholder:text-neutral-400 dark:placeholder:text-dark-text-sec"
+                      />
+                    </div>
+                  </div>
+
+                  {satConversionResult.status === 'invalid' && (
+                    <div className="flex items-start gap-2.5 text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-200 dark:border-amber-900/30">
+                      <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                      <span>{satConversionResult.message}</span>
+                    </div>
+                  )}
+
+                  {satConversionResult.status === 'success' && (
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100/60 dark:bg-emerald-950/20 p-3 rounded-xl border border-emerald-200 dark:border-emerald-900/30">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <span>Quy đổi thành công: {satConversionResult.converted.toFixed(2)} điểm năng lực.</span>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -772,7 +914,15 @@ export default function ScoreCalculator() {
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => setShowResult(true)}
+            onClick={() => {
+              if (admissionMethod === 'sat') {
+                if (satConversionResult.status !== 'success') {
+                  alert(satConversionResult.message || 'Vui lòng nhập điểm SAT hợp lệ (từ 1200 đến 1600)');
+                  return;
+                }
+              }
+              setShowResult(true);
+            }}
             className="w-full mt-8 bg-gradient-to-r from-[#1a2d6d] to-[#3b7dd8] text-white py-4 rounded-xl font-bold text-lg hover:shadow-xl hover:shadow-primary-500/20 transition-all flex items-center justify-center gap-2"
           >
             <Calculator className="w-5 h-5" />
@@ -794,7 +944,7 @@ export default function ScoreCalculator() {
                 <Trophy className="w-12 h-12 mx-auto mb-3 text-amber-300" />
                 <h2 className="text-xl font-bold mb-1">Kết quả tính điểm PT2</h2>
                 <p className="text-primary-200">
-                  {hasDGNL ? 'Có thi ĐGNL' : 'Không thi ĐGNL'}
+                  {admissionMethod === 'dgnl' ? 'Có thi ĐGNL' : admissionMethod === 'sat' ? 'Quy đổi SAT' : 'Không thi ĐGNL'}
                 </p>
               </div>
 
@@ -805,9 +955,11 @@ export default function ScoreCalculator() {
                     <div>
                       <span className="font-medium text-blue-700 dark:text-blue-400">Điểm năng lực</span>
                       <p className="text-xs text-blue-500 dark:text-blue-500/80 mt-0.5">
-                        {hasDGNL 
+                        {admissionMethod === 'dgnl' 
                           ? `(${scores.dgnlScore || 0} + ${scores.dgnlToan || 0} × 2) / 15`
-                          : `${result.diemTNTHPTQuyDoi} × 0.75`
+                          : admissionMethod === 'sat'
+                            ? `Quy đổi SAT (${satScore})`
+                            : `${result.diemTNTHPTQuyDoi} × 0.75`
                         }
                       </p>
                     </div>
@@ -1049,6 +1201,114 @@ export default function ScoreCalculator() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* SAT Conversion Reference Modal */}
+      <AnimatePresence>
+        {showSatModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-dark-surface border border-neutral-200 dark:border-dark-border rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh] transition-colors duration-300"
+            >
+              {/* Modal Header */}
+              <div className="bg-gradient-to-r from-[#1a2d6d] to-[#3b7dd8] p-4 text-white flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-5 h-5 text-amber-300" />
+                  <h3 className="font-bold text-lg !text-white">Bảng quy đổi chứng chỉ tuyển sinh quốc tế</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSatModal(false)}
+                  className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/80 hover:text-white transition-colors border-0 bg-transparent text-xl font-bold cursor-pointer"
+                >
+                  &times;
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto space-y-4">
+                <p className="text-sm text-neutral-600 dark:text-dark-text-sec leading-relaxed">
+                  Dưới đây là bảng quy đổi điểm chứng chỉ tuyển sinh quốc tế (SAT, ACT, IB, A-Level) sang thang điểm 100 của Trường Đại học Bách khoa (ĐHQG-HCM) áp dụng trong phương thức xét tuyển tổng hợp.
+                </p>
+                
+                <div className="border border-neutral-200 dark:border-dark-border rounded-xl overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-sm min-w-[500px]">
+                      <thead>
+                        <tr className="bg-neutral-50 dark:bg-dark-hover border-b border-neutral-200 dark:border-dark-border text-neutral-700 dark:text-dark-text-main font-semibold">
+                          <th className="p-3 text-center">SAT</th>
+                          <th className="p-3 text-center">ACT</th>
+                          <th className="p-3 text-center">IB</th>
+                          <th className="p-3 text-center">A-Level</th>
+                          <th className="p-3 text-center text-blue-600 dark:text-blue-400">Quy đổi (thang 100)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-200 dark:divide-dark-border text-neutral-600 dark:text-dark-text-sec">
+                        {[
+                          { sat: '1600', act: '36', ib: '45', aLevel: '', score: '100' },
+                          { sat: '1590', act: '', ib: '', aLevel: '', score: '99' },
+                          { sat: '1580', act: '', ib: '', aLevel: '', score: '98' },
+                          { sat: '1570', act: '', ib: '', aLevel: '', score: '97' },
+                          { sat: '1560', act: '35', ib: '44', aLevel: '', score: '96' },
+                          { sat: '1550', act: '', ib: '', aLevel: 'A*', score: '95' },
+                          { sat: '1540', act: '', ib: '', aLevel: '', score: '94' },
+                          { sat: '1530', act: '', ib: '43', aLevel: '', score: '93' },
+                          { sat: '1520', act: '34', ib: '', aLevel: '', score: '92' },
+                          { sat: '1510', act: '', ib: '', aLevel: '', score: '91' },
+                          { sat: '1500', act: '', ib: '42', aLevel: '', score: '90' },
+                          { sat: '1480', act: '33', ib: '', aLevel: '', score: '88' },
+                          { sat: '1470', act: '', ib: '41', aLevel: '', score: '87' },
+                          { sat: '1450', act: '', ib: '', aLevel: 'A', score: '85' },
+                          { sat: '1440', act: '32', ib: '40', aLevel: '', score: '84' },
+                          { sat: '1410', act: '31', ib: '39', aLevel: '', score: '81' },
+                          { sat: '1400', act: '', ib: '', aLevel: '', score: '80' },
+                          { sat: '1380', act: '30', ib: '38', aLevel: '', score: '78' },
+                          { sat: '1350', act: '29', ib: '37', aLevel: 'B', score: '75' },
+                          { sat: '1320', act: '28', ib: '36', aLevel: '', score: '72' },
+                          { sat: '1300', act: '', ib: '', aLevel: '', score: '70' },
+                          { sat: '1280', act: '27', ib: '35', aLevel: '', score: '69' },
+                          { sat: '1260', act: '', ib: '', aLevel: '', score: '68' },
+                          { sat: '1240', act: '26', ib: '34', aLevel: '', score: '67' },
+                          { sat: '1220', act: '', ib: '', aLevel: '', score: '66' },
+                          { sat: '1200', act: '25', ib: '33', aLevel: 'C', score: '65' }
+                        ].map((row, idx) => (
+                          <tr key={idx} className="hover:bg-neutral-50 dark:hover:bg-dark-hover transition-colors">
+                            <td className="p-2 text-center font-medium">{row.sat}</td>
+                            <td className="p-2 text-center">{row.act || '-'}</td>
+                            <td className="p-2 text-center">{row.ib || '-'}</td>
+                            <td className="p-2 text-center font-semibold text-purple-600 dark:text-purple-400">{row.aLevel || '-'}</td>
+                            <td className="p-2 text-center font-bold text-blue-600 dark:text-blue-400">{row.score}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-2.5 text-xs text-neutral-500 dark:text-dark-text-sec bg-neutral-50 dark:bg-dark-hover p-3 rounded-xl border border-neutral-200 dark:border-dark-border leading-relaxed">
+                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-500" />
+                  <p>
+                    <strong>Lưu ý về quy đổi:</strong> Đối với các mức điểm nằm giữa các khoảng trên (đặc biệt là trong khoảng 1200 đến 1300), hệ thống sẽ áp dụng <strong>phương pháp nội suy tuyến tính</strong> để tính toán điểm số lẻ chính xác nhất cho thí sinh (ví dụ: 1290 quy đổi thành 69.50).
+                  </p>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 border-t border-neutral-200 dark:border-dark-border bg-neutral-50 dark:bg-dark-hover flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSatModal(false)}
+                  className="px-4 py-2 bg-neutral-200 dark:bg-dark-border text-neutral-700 dark:text-dark-text-main rounded-lg font-medium hover:bg-neutral-300 dark:hover:bg-dark-border/80 transition-colors text-sm border-0 cursor-pointer"
+                >
+                  Đóng
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
