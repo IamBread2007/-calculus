@@ -31,7 +31,10 @@ dist-ssr
 package-lock.json
 skills-lock.json
 
-# Temp files
+# Temp & AI files
 temp_scores.json
 .env
 .env.*
+.codegraph/
+*.png
+

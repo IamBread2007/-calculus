@@ -1,0 +1,144 @@
+name: Reusable Docker build & publish
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Extra semver tag to apply (e.g. 1.2.3); empty to skip
+        type: string
+        default: ''
+    outputs:
+      image:
+        description: Pushed image reference by digest
+        value: ${{ jobs.build.outputs.image }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image: ${{ steps.image.outputs.ref }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Pin timestamps to commit date for reproducible layers
+      - name: Derive SOURCE_DATE_EPOCH from the commit
+        id: epoch
+        run: echo "value=$(git log -1 --pretty=%ct)" >>"$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.epoch.outputs.value }}
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_INSFORGE_BASE_URL=${{ secrets.VITE_INSFORGE_BASE_URL }}
+            VITE_INSFORGE_ANON_KEY=${{ secrets.VITE_INSFORGE_ANON_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          sbom: true
+          provenance: mode=max
+          push: true
+
+      - name: Export image ref
+        id: image
+        run: |
+          echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >>"$GITHUB_OUTPUT"
+
+  scan:
+    name: Trivy image scan
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947e7f25d18e1e11948 # v0.28.0
+        with:
+          image-ref: ${{ needs.build.outputs.image }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@60168efe1c415ce0f5521ea06d5c2062adbeed1b # v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+  smoke-test:
+    name: Smoke test
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and run
+        run: |
+          docker pull ${{ needs.build.outputs.image }}
+          docker run -d -p 8080:8080 --name smoke ${{ needs.build.outputs.image }}
+          sleep 5
+
+      - name: Health check
+        run: |
+          curl --fail --retry 3 --retry-delay 2 http://localhost:8080/
+          echo "✅ Root endpoint returned 200"
+
+      - name: SPA fallback check
+        run: |
+          curl --fail http://localhost:8080/some/deep/route | grep -q 'id="root"'
+          echo "✅ SPA fallback works"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f smoke || true
