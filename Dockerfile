@@ -11,7 +11,7 @@ ENV VITE_INSFORGE_BASE_URL=$VITE_INSFORGE_BASE_URL
 ENV VITE_INSFORGE_ANON_KEY=$VITE_INSFORGE_ANON_KEY
 RUN npm run build
 
-FROM nginx:1.29-alpine AS runtime
+FROM nginx:1.31-alpine AS runtime
 
 # Run Nginx as a non-root user for security
 RUN chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /var/log/nginx /etc/nginx/conf.d
