@@ -1,9 +1,7 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Calculator, 
-  ArrowLeft, 
   Trophy,
   Info,
   RotateCcw,
@@ -22,7 +20,6 @@ import { useTheme } from '../contexts/ThemeContext';
 
 export default function ScoreCalculator() {
   const [admissionMethod, setAdmissionMethod] = useState('dgnl'); // 'dgnl' | 'thpt' | 'sat'
-  const hasDGNL = admissionMethod === 'dgnl';
 
   // Admission Scores State
   const [admissionScores, setAdmissionScores] = useState({ daiTra: [], oisp: [] });
@@ -44,7 +41,7 @@ export default function ScoreCalculator() {
   useEffect(() => {
     async function fetchScores() {
       try {
-        const { data, error } = await insforge.database
+        const { data } = await insforge.database
           .from('admission_scores_2025')
           .select('*')
           .order('score', { ascending: false });
@@ -64,7 +61,7 @@ export default function ScoreCalculator() {
 
     async function fetchSatConversions() {
       try {
-        const { data, error } = await insforge.database
+        const { data } = await insforge.database
           .from('sat_conversion_2025')
           .select('*')
           .order('sat_score', { ascending: false });
