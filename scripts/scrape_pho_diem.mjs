@@ -1,6 +1,7 @@
 import fs from 'fs';
 import https from 'https';
 import zlib from 'zlib';
+import { JSDOM } from 'jsdom';
 
 const urls = [
   { id: 'to_hop', name: 'Tổ hợp A00, A01, B00, C00, D01', url: 'https://xaydungchinhsach.chinhphu.vn/pho-diem-cac-to-hop-mon-a00-a01-b00-c00-d01-ky-thi-tot-nghiep-nam-2026-119260701101721263.htm' },
@@ -88,9 +89,10 @@ async function run() {
       const tableMatches = [...contentHtml.matchAll(/<table[^>]*>([\s\S]*?)<\/table>/gi)];
       const tables = tableMatches.map(t => {
         const rows = [...t[1].matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map(r => {
-          const cells = [...r[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(c => 
-            c[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
-          );
+          const cells = [...r[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(c => {
+            const text = new JSDOM(`<body>${c[1]}</body>`).window.document.body.textContent || '';
+            return text.replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+          });
           return cells;
         });
         return rows;
