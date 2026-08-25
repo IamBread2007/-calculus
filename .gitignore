@@ -37,4 +37,5 @@ temp_scores.json
 .env.*
 .codegraph/
 *.png
+opencode.json
 
