@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { insforge } from '../lib/insforge';
 import { useTheme } from '../contexts/ThemeContext';
+import PercentileRankingSection from '../components/PercentileRankingSection';
 
 export default function ScoreCalculator() {
   const [admissionMethod, setAdmissionMethod] = useState('dgnl'); // 'dgnl' | 'thpt' | 'sat'
@@ -1197,6 +1198,9 @@ export default function ScoreCalculator() {
             </motion.section>
           )}
         </AnimatePresence>
+
+        {/* Phân tích vị thế & Tra cứu Phổ điểm toàn quốc */}
+        <PercentileRankingSection enteredScores={scores} />
       </main>
 
       {/* SAT Conversion Reference Modal */}
