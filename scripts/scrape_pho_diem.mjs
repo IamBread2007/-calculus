@@ -43,6 +43,12 @@ function fetchUrl(url) {
   });
 }
 
+function extractTextFromHtmlFragment(fragment) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${fragment}</div>`, 'text/html');
+  return (doc.documentElement.textContent || '').trim();
+}
+
 async function run() {
   const results = [];
   for (const item of urls) {
@@ -52,7 +58,7 @@ async function run() {
       
       // Title
       const titleMatch = html.match(/<h1[^>]*class="[^"]*detail-title[^"]*"[^>]*>([\s\S]*?)<\/h1>/i) || html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-      const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+      const title = titleMatch ? extractTextFromHtmlFragment(titleMatch[1]) : '';
 
       // All images
       const imgMatches = [...html.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi)];
